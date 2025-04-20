@@ -15,6 +15,7 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/google/generative-ai-go/genai"
+	"github.com/joho/godotenv"
 	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/api/option"
 )
@@ -54,19 +55,24 @@ type Claims struct {
 
 // Fungsi untuk inisialisasi database
 func InitDB() {
-	// Mengambil informasi URL koneksi database dari variabel lingkungan
-	databaseURL := os.Getenv("DATABASE_URL") // Railway akan menyet variabel ini secara otomatis
+	// Memuat file .env
+	if err := godotenv.Load(); err != nil {
+		log.Fatal("Error loading .env file")
+	}
 
+	// Mengambil informasi URL koneksi database dari variabel lingkungan
+	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
 		log.Fatal("DATABASE_URL environment variable is not set")
 	}
 
 	var err error
-	DB, err = sql.Open("mysql", databaseURL) // Koneksi menggunakan DATABASE_URL
+	DB, err = sql.Open("mysql", databaseURL) // Menggunakan DATABASE_URL dari .env
 	if err != nil {
 		log.Fatalf("Gagal terhubung ke database: %v", err)
 	}
 
+	// Verifikasi koneksi ke database
 	err = DB.Ping()
 	if err != nil {
 		log.Fatalf("Tidak bisa terhubung ke database: %v", err)
@@ -103,8 +109,43 @@ func GetFoods() ([]Food, error) {
 
 // Fungsi untuk menghapus makanan berdasarkan ID
 func DeleteFood(id string) error {
-	_, err := DB.Exec("DELETE FROM foods WHERE id = ?", id)
-	return err
+	// Log ID yang diterima untuk memastikan ID benar
+	fmt.Println("Menghapus makanan dengan ID:", id)
+
+	// Periksa apakah makanan dengan ID tersebut ada
+	var exists bool
+	err := DB.QueryRow("SELECT EXISTS(SELECT 1 FROM foods WHERE id = ?)", id).Scan(&exists)
+	if err != nil {
+		log.Printf("Error saat memeriksa eksistensi makanan: %v", err)
+		return fmt.Errorf("gagal memeriksa eksistensi makanan: %v", err)
+	}
+
+	// Jika makanan tidak ditemukan
+	if !exists {
+		return fmt.Errorf("Makanan dengan ID %s tidak ditemukan", id)
+	}
+
+	// Hapus data makanan jika ditemukan
+	_, err = DB.Exec("DELETE FROM foods WHERE id = ?", id)
+	if err != nil {
+		log.Printf("Error saat menghapus makanan: %v", err)
+		return fmt.Errorf("gagal menghapus makanan: %v", err)
+	}
+
+	// Verifikasi bahwa data sudah dihapus
+	var checkExists bool
+	err = DB.QueryRow("SELECT EXISTS(SELECT 1 FROM foods WHERE id = ?)", id).Scan(&checkExists)
+	if err != nil {
+		log.Printf("Error saat memverifikasi penghapusan makanan: %v", err)
+		return fmt.Errorf("gagal memverifikasi penghapusan makanan: %v", err)
+	}
+
+	// Jika makanan masih ada, berarti penghapusan gagal
+	if checkExists {
+		return fmt.Errorf("Gagal menghapus makanan dengan ID %s", id)
+	}
+
+	return nil
 }
 
 // Fungsi untuk menambah resep makanan ke database
@@ -329,8 +370,14 @@ func main() {
 	// Route untuk register pengguna baru
 	r.POST("/register", registerHandler)
 
+	// Route untuk register pengguna baru oleh Admin (Admin hanya yang bisa memberikan role 'admin')
+	r.POST("/register/admin", ValidateToken, CheckRole("admin"), registerHandler)
+
 	// Route untuk login pengguna
 	r.POST("/login", loginHandler)
+
+	// Route untuk melihat semua user (Hanya bisa diakses oleh admin)
+	r.GET("/users", ValidateToken, getAllUsersHandler)
 
 	// Admin/User: Bisa menambah makanan
 	r.POST("/foods", ValidateToken, func(c *gin.Context) {
