@@ -82,14 +82,14 @@ func InitDB() {
 }
 
 // Fungsi untuk menambah makanan ke database
-func AddFood(name, expiryDate string) error {
-	_, err := DB.Exec("INSERT INTO foods (name, expiry_date) VALUES (?, ?)", name, expiryDate)
+func AddFood(name, expiryDate, userId string) error {
+	_, err := DB.Exec("INSERT INTO foods (name, expiry_date, user_id) VALUES (?, ?, ?)", name, expiryDate, userId)
 	return err
 }
 
-// Fungsi untuk mengambil semua makanan dari database
-func GetFoods() ([]Food, error) {
-	rows, err := DB.Query("SELECT id, name, expiry_date FROM foods")
+// Fungsi untuk mengambil semua makanan dari database berdasarkan user_id
+func GetFoods(userId string) ([]Food, error) {
+	rows, err := DB.Query("SELECT id, name, expiry_date FROM foods WHERE user_id = ?", userId)
 	if err != nil {
 		return nil, err
 	}
@@ -107,51 +107,30 @@ func GetFoods() ([]Food, error) {
 	return foods, nil
 }
 
-// Fungsi untuk menghapus makanan berdasarkan ID
-func DeleteFood(id string) error {
-	// Log ID yang diterima untuk memastikan ID benar
-	fmt.Println("Menghapus makanan dengan ID:", id)
-
-	// Periksa apakah makanan dengan ID tersebut ada
-	var exists bool
-	err := DB.QueryRow("SELECT EXISTS(SELECT 1 FROM foods WHERE id = ?)", id).Scan(&exists)
-	if err != nil {
-		log.Printf("Error saat memeriksa eksistensi makanan: %v", err)
-		return fmt.Errorf("gagal memeriksa eksistensi makanan: %v", err)
-	}
-
-	// Jika makanan tidak ditemukan
-	if !exists {
-		return fmt.Errorf("Makanan dengan ID %s tidak ditemukan", id)
-	}
-
-	// Hapus data makanan jika ditemukan
-	_, err = DB.Exec("DELETE FROM foods WHERE id = ?", id)
-	if err != nil {
-		log.Printf("Error saat menghapus makanan: %v", err)
-		return fmt.Errorf("gagal menghapus makanan: %v", err)
-	}
-
-	// Verifikasi bahwa data sudah dihapus
-	var checkExists bool
-	err = DB.QueryRow("SELECT EXISTS(SELECT 1 FROM foods WHERE id = ?)", id).Scan(&checkExists)
-	if err != nil {
-		log.Printf("Error saat memverifikasi penghapusan makanan: %v", err)
-		return fmt.Errorf("gagal memverifikasi penghapusan makanan: %v", err)
-	}
-
-	// Jika makanan masih ada, berarti penghapusan gagal
-	if checkExists {
-		return fmt.Errorf("Gagal menghapus makanan dengan ID %s", id)
-	}
-
-	return nil
+// Fungsi untuk menambah resep makanan ke database
+func AddFoodRecipe(foodID int, recipe, userId string) error {
+	_, err := DB.Exec("INSERT INTO food_recipes (food_id, recipe, user_id) VALUES (?, ?, ?)", foodID, recipe, userId)
+	return err
 }
 
-// Fungsi untuk menambah resep makanan ke database
-func AddFoodRecipe(foodID int, recipe string) error {
-	_, err := DB.Exec("INSERT INTO food_recipes (food_id, recipe) VALUES (?, ?)", foodID, recipe)
-	return err
+// Fungsi untuk mengambil resep makanan berdasarkan user_id
+func GetFoodRecipes(userId string) ([]string, error) {
+	rows, err := DB.Query("SELECT recipe FROM food_recipes WHERE user_id = ?", userId)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var recipes []string
+	for rows.Next() {
+		var recipe string
+		if err := rows.Scan(&recipe); err != nil {
+			return nil, err
+		}
+		recipes = append(recipes, recipe)
+	}
+
+	return recipes, nil
 }
 
 // Fungsi untuk menghasilkan JWT token
@@ -204,6 +183,16 @@ func ValidateToken(c *gin.Context) {
 	// Menyimpan informasi user ke context untuk akses di handler berikutnya
 	if claims, ok := token.Claims.(*Claims); ok && token.Valid {
 		c.Set("username", claims.Username)
+
+		// Mengambil user_id berdasarkan username dari database
+		var userId string
+		err := DB.QueryRow("SELECT id FROM users WHERE username = ?", claims.Username).Scan(&userId)
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
+			c.Abort()
+			return
+		}
+		c.Set("user_id", userId) // Menyimpan user_id dalam context
 		c.Next()
 	} else {
 		c.JSON(401, gin.H{"error": "Token tidak valid"})
@@ -303,64 +292,7 @@ func hashPassword(password string) (string, error) {
 	return string(hashedPassword), nil
 }
 
-// Fungsi untuk memeriksa role pengguna
-func CheckRole(role string) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		username := c.MustGet("username").(string) // Mendapatkan username dari context
-
-		// Cek role pengguna di database (misalnya dengan query)
-		var userRole string
-		err := DB.QueryRow("SELECT role FROM users WHERE username = ?", username).Scan(&userRole)
-		if err != nil {
-			c.JSON(http.StatusForbidden, gin.H{"error": "Role tidak ditemukan"})
-			c.Abort()
-			return
-		}
-
-		// Pastikan role pengguna sesuai
-		if userRole != role {
-			c.JSON(http.StatusForbidden, gin.H{"error": "Akses ditolak, role tidak sesuai"})
-			c.Abort()
-			return
-		}
-
-		c.Next() // Lanjutkan ke handler berikutnya jika role cocok
-	}
-}
-
-// Route untuk melihat semua user
-func getAllUsersHandler(c *gin.Context) {
-	// Hanya admin yang bisa mengakses endpoint ini
-	username := c.MustGet("username").(string)
-	var userRole string
-	err := DB.QueryRow("SELECT role FROM users WHERE username = ?", username).Scan(&userRole)
-	if err != nil || userRole != "admin" {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Only admin can view all users"})
-		return
-	}
-
-	// Ambil semua user dari database
-	rows, err := DB.Query("SELECT username, role FROM users")
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch users"})
-		return
-	}
-	defer rows.Close()
-
-	var users []map[string]interface{}
-	for rows.Next() {
-		var username, role string
-		err := rows.Scan(&username, &role)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read users"})
-			return
-		}
-		users = append(users, map[string]interface{}{"username": username, "role": role})
-	}
-
-	c.JSON(http.StatusOK, gin.H{"users": users})
-}
-
+// Route utama
 func main() {
 	// Inisialisasi database
 	InitDB()
@@ -370,14 +302,29 @@ func main() {
 	// Route untuk register pengguna baru
 	r.POST("/register", registerHandler)
 
-	// Route untuk register pengguna baru oleh Admin (Admin hanya yang bisa memberikan role 'admin')
-	r.POST("/register/admin", ValidateToken, CheckRole("admin"), registerHandler)
-
 	// Route untuk login pengguna
 	r.POST("/login", loginHandler)
+	// Endpoint untuk melihat semua resep yang dimiliki oleh pengguna
+	r.GET("/recipes", ValidateToken, func(c *gin.Context) {
+		// Mendapatkan user_id dari context
+		userId := c.MustGet("user_id").(string)
 
-	// Route untuk melihat semua user (Hanya bisa diakses oleh admin)
-	r.GET("/users", ValidateToken, getAllUsersHandler)
+		// Mengambil resep yang dimiliki oleh pengguna yang sedang login
+		recipes, err := GetFoodRecipes(userId)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil resep"})
+			return
+		}
+
+		// Jika tidak ada resep ditemukan
+		if len(recipes) == 0 {
+			c.JSON(http.StatusOK, gin.H{"message": "Tidak ada resep yang ditemukan"})
+			return
+		}
+
+		// Mengirimkan daftar resep yang dimiliki oleh pengguna
+		c.JSON(http.StatusOK, gin.H{"recipes": recipes})
+	})
 
 	// Admin/User: Bisa menambah makanan
 	r.POST("/foods", ValidateToken, func(c *gin.Context) {
@@ -386,7 +333,9 @@ func main() {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Format request salah"})
 			return
 		}
-		err := AddFood(req.Name, req.ExpiryDate)
+
+		userId := c.MustGet("user_id").(string)
+		err := AddFood(req.Name, req.ExpiryDate, userId)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menyimpan makanan"})
 			return
@@ -397,9 +346,20 @@ func main() {
 	// Admin/User: Bisa menghapus makanan
 	r.DELETE("/foods/:id", ValidateToken, func(c *gin.Context) {
 		id := c.Param("id")
-		err := DeleteFood(id)
+		userId := c.MustGet("user_id").(string)
+
+		// Pastikan makanan ini milik user yang login
+		var foodUserId string
+		err := DB.QueryRow("SELECT user_id FROM foods WHERE id = ?", id).Scan(&foodUserId)
+		if err != nil || foodUserId != userId {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Makanan tidak ditemukan atau tidak milik Anda"})
+			return
+		}
+
+		// Hapus makanan
+		_, err = DB.Exec("DELETE FROM foods WHERE id = ?", id)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menghapus makanan"})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"message": "Makanan berhasil dihapus"})
@@ -407,16 +367,18 @@ func main() {
 
 	// User: Bisa melihat makanan
 	r.GET("/foods", ValidateToken, func(c *gin.Context) {
-		foods, err := GetFoods()
+		userId := c.MustGet("user_id").(string)
+
+		// Ambil makanan yang dimiliki oleh pengguna yang sedang login
+		foods, err := GetFoods(userId)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil data"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil data makanan"})
 			return
 		}
 		c.JSON(http.StatusOK, foods)
 	})
 
 	// User: Bisa meminta resep
-	// User: Bisa meminta resep berdasarkan ID makanan
 	r.POST("/recipe", ValidateToken, func(c *gin.Context) {
 		var req RecipeRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -424,14 +386,18 @@ func main() {
 			return
 		}
 
-		// Validasi ID makanan yang dipilih
+		// Mendapatkan user_id dari context
+		userId := c.MustGet("user_id").(string)
+
+		// Validasi ID makanan yang dipilih, pastikan makanan tersebut milik user yang sedang login
 		var foodName string
-		err := DB.QueryRow("SELECT name FROM foods WHERE id = ?", req.FoodID).Scan(&foodName)
+		err := DB.QueryRow("SELECT name FROM foods WHERE id = ? AND user_id = ?", req.FoodID, userId).Scan(&foodName)
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Makanan tidak ditemukan"})
+			c.JSON(http.StatusNotFound, gin.H{"error": "Makanan tidak ditemukan atau tidak milik Anda"})
 			return
 		}
 
+		// Membuat prompt AI untuk resep
 		apiKey := os.Getenv("API_KEY")
 		if apiKey == "" {
 			log.Fatal("API key tidak ditemukan! Pastikan sudah diset di environment variable.")
@@ -444,7 +410,7 @@ func main() {
 		defer client.Close()
 
 		// Membuat prompt AI berdasarkan nama makanan yang dipilih
-		userInput := fmt.Sprintf("anggap dirimu adalah chef Berikan resep gampang dan berikan ukuran pasti tapi enak untuk: %s. di terakhir tuliskan by Chef SaveBite", foodName)
+		userInput := fmt.Sprintf("anggap dirimu adalah chef. Berikan resep gampang dan berikan ukuran pasti tapi enak untuk: %s. Di terakhir tuliskan by Chef SaveBite", foodName)
 
 		model := client.GenerativeModel("gemini-1.5-flash")
 		resp, err := model.GenerateContent(ctx, genai.Text(userInput))
@@ -458,13 +424,13 @@ func main() {
 			return
 		}
 
+		// Menyimpan resep ke database untuk makanan yang relevan
 		var output strings.Builder
 		for _, part := range resp.Candidates[0].Content.Parts {
 			output.WriteString(fmt.Sprintf("%v\n", part))
 		}
 
-		// Menyimpan resep ke database untuk makanan yang relevan
-		err = AddFoodRecipe(req.FoodID, output.String())
+		err = AddFoodRecipe(req.FoodID, output.String(), userId)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menyimpan resep ke database"})
 			return
