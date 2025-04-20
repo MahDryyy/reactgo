@@ -39,7 +39,7 @@ type AddFoodRequest struct {
 
 // Request untuk resep
 type RecipeRequest struct {
-	FoodName string `json:"food_name"`
+	FoodID int `json:"food_id"`
 }
 
 // Response untuk resep
@@ -416,12 +416,22 @@ func main() {
 	})
 
 	// User: Bisa meminta resep
+	// User: Bisa meminta resep berdasarkan ID makanan
 	r.POST("/recipe", ValidateToken, func(c *gin.Context) {
 		var req RecipeRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Format request salah"})
 			return
 		}
+
+		// Validasi ID makanan yang dipilih
+		var foodName string
+		err := DB.QueryRow("SELECT name FROM foods WHERE id = ?", req.FoodID).Scan(&foodName)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Makanan tidak ditemukan"})
+			return
+		}
+
 		apiKey := os.Getenv("API_KEY")
 		if apiKey == "" {
 			log.Fatal("API key tidak ditemukan! Pastikan sudah diset di environment variable.")
@@ -433,7 +443,8 @@ func main() {
 		}
 		defer client.Close()
 
-		userInput := fmt.Sprintf("anggap dirimu adalah chef Berikan resep gampang dan berikan ukuran pasti tapi enak untuk: %s", req.FoodName+" di terakhir tuliskan by Chef SaveBite")
+		// Membuat prompt AI berdasarkan nama makanan yang dipilih
+		userInput := fmt.Sprintf("anggap dirimu adalah chef Berikan resep gampang dan berikan ukuran pasti tapi enak untuk: %s. di terakhir tuliskan by Chef SaveBite", foodName)
 
 		model := client.GenerativeModel("gemini-1.5-flash")
 		resp, err := model.GenerateContent(ctx, genai.Text(userInput))
@@ -452,13 +463,14 @@ func main() {
 			output.WriteString(fmt.Sprintf("%v\n", part))
 		}
 
-		foodID := 1 // Harus diambil dari food yang relevan
-		err = AddFoodRecipe(foodID, output.String())
+		// Menyimpan resep ke database untuk makanan yang relevan
+		err = AddFoodRecipe(req.FoodID, output.String())
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menyimpan resep ke database"})
 			return
 		}
 
+		// Mengirimkan resep yang dihasilkan ke pengguna
 		c.JSON(http.StatusOK, RecipeResponse{Recipe: output.String()})
 	})
 
