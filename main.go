@@ -163,39 +163,39 @@ func ValidateToken(c *gin.Context) {
 		return
 	}
 
-	tokenString = tokenString[7:] // Menghapus prefix "Bearer "
+	tokenString = tokenString[7:] // Remove "Bearer " prefix
 
-	// Mem-parsing token dan memverifikasi kebenarannya
 	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
-		// Memastikan token menggunakan algoritma yang benar
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("metode signing tidak valid")
+			return nil, fmt.Errorf("invalid signing method")
 		}
 		return jwtSecret, nil
 	})
 
 	if err != nil || !token.Valid {
-		c.JSON(401, gin.H{"error": "Token tidak valid"})
+		c.JSON(401, gin.H{"error": "Invalid token"})
 		c.Abort()
 		return
 	}
 
-	// Menyimpan informasi user ke context untuk akses di handler berikutnya
 	if claims, ok := token.Claims.(*Claims); ok && token.Valid {
 		c.Set("username", claims.Username)
 
-		// Mengambil user_id berdasarkan username dari database
-		var userId string
-		err := DB.QueryRow("SELECT id FROM users WHERE username = ?", claims.Username).Scan(&userId)
+		// Fetch user info from DB (id, role)
+		var userId, role string
+		err := DB.QueryRow("SELECT id, role FROM users WHERE username = ?", claims.Username).Scan(&userId, &role)
 		if err != nil {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
 			c.Abort()
 			return
 		}
-		c.Set("user_id", userId) // Menyimpan user_id dalam context
+
+		// Store user_id and role in context
+		c.Set("user_id", userId)
+		c.Set("role", role)
 		c.Next()
 	} else {
-		c.JSON(401, gin.H{"error": "Token tidak valid"})
+		c.JSON(401, gin.H{"error": "Invalid token"})
 		c.Abort()
 	}
 }
@@ -283,6 +283,38 @@ func registerHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "User registered successfully"})
 }
 
+// Fungsi untuk mengambil semua pengguna dari database
+func GetUsers() ([]map[string]interface{}, error) {
+	rows, err := DB.Query("SELECT id, username, role FROM users")
+	if err != nil {
+		log.Printf("Error executing query: %v", err) // Log the error for debugging
+		return nil, err
+	}
+	defer rows.Close()
+
+	var users []map[string]interface{}
+	for rows.Next() {
+		var userId, username, role string
+		if err := rows.Scan(&userId, &username, &role); err != nil {
+			log.Printf("Error scanning row: %v", err) // Log scanning error
+			return nil, err
+		}
+		user := map[string]interface{}{
+			"id":       userId,
+			"username": username,
+			"role":     role,
+		}
+		users = append(users, user)
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Printf("Error iterating over rows: %v", err) // Log iteration error
+		return nil, err
+	}
+
+	return users, nil
+}
+
 // Fungsi untuk hash password
 func hashPassword(password string) (string, error) {
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -324,6 +356,27 @@ func main() {
 
 		// Mengirimkan daftar resep yang dimiliki oleh pengguna
 		c.JSON(http.StatusOK, gin.H{"recipes": recipes})
+	})
+	// Endpoint untuk melihat daftar pengguna
+	r.GET("/users", ValidateToken, func(c *gin.Context) {
+		// Mengambil role dari context
+		role := c.MustGet("role").(string)
+
+		// Memastikan hanya admin yang bisa mengakses endpoint ini
+		if role != "admin" {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Anda tidak memiliki izin untuk mengakses daftar pengguna"})
+			return
+		}
+
+		// Mengambil daftar pengguna dari database
+		users, err := GetUsers()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil data pengguna"})
+			return
+		}
+
+		// Mengirimkan daftar pengguna
+		c.JSON(http.StatusOK, gin.H{"users": users})
 	})
 
 	// Admin/User: Bisa menambah makanan
