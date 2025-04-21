@@ -7,8 +7,8 @@ require (
 	github.com/go-sql-driver/mysql v1.9.2
 	github.com/golang-jwt/jwt/v4 v4.5.2
 	github.com/google/generative-ai-go v0.19.0
-	golang.org/x/crypto v0.37.0
 	github.com/joho/godotenv v1.5.1
+	golang.org/x/crypto v0.37.0
 	google.golang.org/api v0.229.0
 )
 
@@ -37,7 +37,7 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.6 // indirect
 	github.com/googleapis/gax-go/v2 v2.14.1 // indirect
-	 // indirect
+	// indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.7 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
