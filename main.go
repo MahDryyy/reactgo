@@ -74,29 +74,26 @@ func main() {
 	})
 
 	r.DELETE("/recipes/:id", db.ValidateToken, func(c *gin.Context) {
-		
+
 		id := c.Param("id")
-		
+
 		userId := c.MustGet("user_id").(string)
 
-		
 		var recipeUserId string
 		err := db.DB.QueryRow("SELECT user_id FROM food_recipes WHERE id = ?", id).Scan(&recipeUserId)
 		if err != nil || recipeUserId != userId {
-			
+
 			c.JSON(http.StatusForbidden, gin.H{"error": "Resep tidak ditemukan atau tidak milik Anda"})
 			return
 		}
 
-	
 		_, err = db.DB.Exec("DELETE FROM food_recipes WHERE id = ?", id)
 		if err != nil {
-			
+
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menghapus resep"})
 			return
 		}
 
-		
 		c.JSON(http.StatusOK, gin.H{"message": "Resep berhasil dihapus"})
 	})
 

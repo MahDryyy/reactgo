@@ -6,8 +6,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
 	"database/sql"
 
@@ -306,10 +308,35 @@ func LoginHandler(c *gin.Context) {
 	c.JSON(200, gin.H{"token": token})
 }
 
+func isValidEmail(email string) bool {
+
+	re := regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
+	return re.MatchString(email)
+}
+
+func isValidPassword(password string) bool {
+	if len(password) < 8 {
+		return false
+	}
+
+	var hasUpper, hasSymbol bool
+
+	for _, char := range password {
+		if unicode.IsUpper(char) {
+			hasUpper = true
+		} else if strings.ContainsRune("!@#$%^&*()_+{}[]:;<>,.?/~`-=", char) {
+			hasSymbol = true
+		}
+	}
+
+	return hasUpper && hasSymbol
+}
+
 func RegisterHandler(c *gin.Context) {
 	var req struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
+		Email    string `json:"email"`
 		Role     string `json:"role"`
 	}
 
@@ -323,8 +350,25 @@ func RegisterHandler(c *gin.Context) {
 		return
 	}
 
+	if !isValidEmail(req.Email) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid email format"})
+		return
+	}
+
+	if !isValidPassword(req.Password) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Password must be at least 8 characters long, contain an uppercase letter and a symbol"})
+		return
+	}
+
+	var existingEmail string
+	err := DB.QueryRow("SELECT email FROM users WHERE email = ?", req.Email).Scan(&existingEmail)
+	if err == nil {
+		c.JSON(http.StatusConflict, gin.H{"error": "Email already exists"})
+		return
+	}
+
 	var existingUsername string
-	err := DB.QueryRow("SELECT username FROM users WHERE username = ?", req.Username).Scan(&existingUsername)
+	err = DB.QueryRow("SELECT username FROM users WHERE username = ?", req.Username).Scan(&existingUsername)
 	if err == nil {
 		c.JSON(http.StatusConflict, gin.H{"error": "Username already exists"})
 		return
@@ -336,7 +380,7 @@ func RegisterHandler(c *gin.Context) {
 		return
 	}
 
-	_, err = DB.Exec("INSERT INTO users (username, password, role) VALUES (?, ?, ?)", req.Username, hashedPassword, req.Role)
+	_, err = DB.Exec("INSERT INTO users (username, password, email, role) VALUES (?, ?, ?, ?)", req.Username, hashedPassword, req.Email, req.Role)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
 		return
@@ -385,7 +429,7 @@ func GetUsers() ([]map[string]interface{}, error) {
 	}
 
 	if err := rows.Err(); err != nil {
-		log.Printf("Error iterating over rows: %v", err) 
+		log.Printf("Error iterating over rows: %v", err)
 		return nil, err
 	}
 
