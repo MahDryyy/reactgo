@@ -278,9 +278,9 @@ func LoginHandler(c *gin.Context) {
 		return
 	}
 
-	var storedPasswordHash string
+	var storedPasswordHash, userRole string
 	var userId string
-	err := DB.QueryRow("SELECT id, password FROM users WHERE username = ?", req.Username).Scan(&userId, &storedPasswordHash)
+	err := DB.QueryRow("SELECT id, password, role FROM users WHERE username = ?", req.Username).Scan(&userId, &storedPasswordHash, &userRole)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
 		return
@@ -305,7 +305,10 @@ func LoginHandler(c *gin.Context) {
 		log.Printf("Gagal menyimpan log login: %v", err)
 	}
 
-	c.JSON(200, gin.H{"token": token})
+	c.JSON(200, gin.H{
+		"token": token,
+		"role":  userRole, // Menyertakan role di response
+	})
 }
 
 func isValidEmail(email string) bool {
