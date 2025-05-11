@@ -21,8 +21,7 @@ import (
 )
 
 var DB *sql.DB
-var jwtSecret = []byte("your_secret_key") 
-
+var jwtSecret = []byte("your_secret_key")
 
 type Food struct {
 	ID         int    `json:"id"`
@@ -40,6 +39,8 @@ type RecipeRequest struct {
 }
 
 type RecipeResponse struct {
+	ID     int    `json:"id"`
+	FoodID int    `json:"food_id"`
 	Recipe string `json:"recipe"`
 }
 
@@ -55,7 +56,6 @@ type LoginLog struct {
 	LoginTime string
 	IPAddress string
 }
-
 
 func InitDB() {
 	if err := godotenv.Load(); err != nil {
@@ -82,58 +82,51 @@ func InitDB() {
 }
 
 func GetLoginLogs(userId string) ([]LoginLog, error) {
-	
+
 	rows, err := DB.Query("SELECT id, user_id, username, login_time, ip_address FROM login_logs ORDER BY login_time DESC")
 	if err != nil {
-		
+
 		return nil, fmt.Errorf("gagal menjalankan query: %v", err)
 	}
-	defer rows.Close() 
+	defer rows.Close()
 
-	
 	var logs []LoginLog
 
-	
 	for rows.Next() {
 		var logEntry LoginLog
-		
+
 		if err := rows.Scan(&logEntry.ID, &logEntry.UserID, &logEntry.Username, &logEntry.LoginTime, &logEntry.IPAddress); err != nil {
-			
+
 			return nil, fmt.Errorf("gagal melakukan scan baris: %v", err)
 		}
 		logs = append(logs, logEntry)
 	}
 
-	
 	if err := rows.Err(); err != nil {
-		
+
 		return nil, fmt.Errorf("terjadi kesalahan saat iterasi: %v", err)
 	}
 
-	
 	return logs, nil
 }
-
 
 func AddFood(name, expiryDate, userId string) error {
 	_, err := DB.Exec("INSERT INTO foods (name, expiry_date, user_id) VALUES (?, ?, ?)", name, expiryDate, userId)
 	return err
 }
 
-
 func GenerateJWT(username string) (string, error) {
-	expirationTime := time.Now().Add(24 * time.Hour) 
+	expirationTime := time.Now().Add(24 * time.Hour)
 	claims := &Claims{
 		Username: username,
 		StandardClaims: jwt.StandardClaims{
-			ExpiresAt: expirationTime.Unix(), 
-			Issuer:    "myapp",               
+			ExpiresAt: expirationTime.Unix(),
+			Issuer:    "myapp",
 		},
 	}
 
-	
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	
+
 	tokenString, err := token.SignedString(jwtSecret)
 	if err != nil {
 		return "", err
@@ -141,7 +134,6 @@ func GenerateJWT(username string) (string, error) {
 
 	return tokenString, nil
 }
-
 
 func GetFoods(userId string) ([]Food, error) {
 	rows, err := DB.Query("SELECT id, name, expiry_date FROM foods WHERE user_id = ?", userId)
@@ -162,32 +154,31 @@ func GetFoods(userId string) ([]Food, error) {
 	return foods, nil
 }
 
-
 func AddFoodRecipe(foodID int, recipe, userId string) error {
 	_, err := DB.Exec("INSERT INTO food_recipes (food_id, recipe, user_id) VALUES (?, ?, ?)", foodID, recipe, userId)
 	return err
 }
 
-func GetFoodRecipes(userId string) ([]string, error) {
-	rows, err := DB.Query("SELECT recipe FROM food_recipes WHERE user_id = ?", userId)
+func GetFoodRecipes(userId string) ([]RecipeResponse, error) {
+
+	rows, err := DB.Query("SELECT id, food_id, recipe FROM food_recipes WHERE user_id = ?", userId)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var recipes []string
+	var recipes []RecipeResponse
+
 	for rows.Next() {
-		var recipe string
-		if err := rows.Scan(&recipe); err != nil {
+		var recipeResponse RecipeResponse
+		if err := rows.Scan(&recipeResponse.ID, &recipeResponse.FoodID, &recipeResponse.Recipe); err != nil {
 			return nil, err
 		}
-		recipes = append(recipes, recipe)
+		recipes = append(recipes, recipeResponse)
 	}
 
 	return recipes, nil
 }
-
-
 func GenerateRecipe(foodName string) (string, error) {
 	apiKey := os.Getenv("API_KEY")
 	if apiKey == "" {
@@ -219,7 +210,6 @@ func GenerateRecipe(foodName string) (string, error) {
 	return output.String(), nil
 }
 
-
 func ValidateToken(c *gin.Context) {
 	tokenString := c.GetHeader("Authorization")
 	if tokenString == "" {
@@ -228,7 +218,7 @@ func ValidateToken(c *gin.Context) {
 		return
 	}
 
-	tokenString = tokenString[7:] 
+	tokenString = tokenString[7:]
 
 	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
@@ -264,10 +254,9 @@ func ValidateToken(c *gin.Context) {
 }
 
 func SaveLoginLog(userId, username, ipAddress string) error {
-	
+
 	loginTime := time.Now().UTC()
 
-	
 	_, err := DB.Exec("INSERT INTO login_logs (user_id, username, ip_address, login_time) VALUES (?, ?, ?, ?)", userId, username, ipAddress, loginTime)
 	if err != nil {
 		log.Printf("Error saving login log: %v", err)
@@ -276,19 +265,16 @@ func SaveLoginLog(userId, username, ipAddress string) error {
 	return nil
 }
 
-
 func LoginHandler(c *gin.Context) {
 	var req struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
 	}
 
-
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
 		return
 	}
-
 
 	var storedPasswordHash string
 	var userId string
@@ -298,33 +284,27 @@ func LoginHandler(c *gin.Context) {
 		return
 	}
 
-	
 	err = bcrypt.CompareHashAndPassword([]byte(storedPasswordHash), []byte(req.Password))
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
 		return
 	}
 
-	
 	token, err := GenerateJWT(req.Username)
 	if err != nil {
 		c.JSON(500, gin.H{"error": "Failed to generate token"})
 		return
 	}
 
-	
 	ipAddress := c.ClientIP()
 
-	
 	err = SaveLoginLog(userId, req.Username, ipAddress)
 	if err != nil {
 		log.Printf("Gagal menyimpan log login: %v", err)
 	}
 
-	
 	c.JSON(200, gin.H{"token": token})
 }
-
 
 func RegisterHandler(c *gin.Context) {
 	var req struct {
@@ -365,7 +345,6 @@ func RegisterHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "User registered successfully"})
 }
 
-
 func hashPassword(password string) (string, error) {
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
@@ -373,7 +352,6 @@ func hashPassword(password string) (string, error) {
 	}
 	return string(hashedPassword), nil
 }
-
 
 func GetFoodName(foodID int, userId string) (string, error) {
 	var foodName string
@@ -386,7 +364,7 @@ func GetFoodName(foodID int, userId string) (string, error) {
 func GetUsers() ([]map[string]interface{}, error) {
 	rows, err := DB.Query("SELECT id, username, role FROM users")
 	if err != nil {
-		log.Printf("Error executing query: %v", err) 
+		log.Printf("Error executing query: %v", err)
 		return nil, err
 	}
 	defer rows.Close()
@@ -395,7 +373,7 @@ func GetUsers() ([]map[string]interface{}, error) {
 	for rows.Next() {
 		var userId, username, role string
 		if err := rows.Scan(&userId, &username, &role); err != nil {
-			log.Printf("Error scanning row: %v", err) 
+			log.Printf("Error scanning row: %v", err)
 			return nil, err
 		}
 		user := map[string]interface{}{
@@ -407,7 +385,7 @@ func GetUsers() ([]map[string]interface{}, error) {
 	}
 
 	if err := rows.Err(); err != nil {
-		log.Printf("Error iterating over rows: %v", err) // Log iteration error
+		log.Printf("Error iterating over rows: %v", err) 
 		return nil, err
 	}
 
