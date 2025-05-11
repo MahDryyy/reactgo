@@ -73,6 +73,33 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"message": "Makanan berhasil disimpan"})
 	})
 
+	r.DELETE("/recipes/:id", db.ValidateToken, func(c *gin.Context) {
+		
+		id := c.Param("id")
+		
+		userId := c.MustGet("user_id").(string)
+
+		
+		var recipeUserId string
+		err := db.DB.QueryRow("SELECT user_id FROM food_recipes WHERE id = ?", id).Scan(&recipeUserId)
+		if err != nil || recipeUserId != userId {
+			
+			c.JSON(http.StatusForbidden, gin.H{"error": "Resep tidak ditemukan atau tidak milik Anda"})
+			return
+		}
+
+	
+		_, err = db.DB.Exec("DELETE FROM food_recipes WHERE id = ?", id)
+		if err != nil {
+			
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menghapus resep"})
+			return
+		}
+
+		
+		c.JSON(http.StatusOK, gin.H{"message": "Resep berhasil dihapus"})
+	})
+
 	r.DELETE("/foods/:id", db.ValidateToken, func(c *gin.Context) {
 		id := c.Param("id")
 		userId := c.MustGet("user_id").(string)
@@ -101,6 +128,32 @@ func main() {
 			return
 		}
 		c.JSON(http.StatusOK, foods)
+	})
+
+	r.GET("/login-logs", db.ValidateToken, func(c *gin.Context) {
+
+		userId, exists := c.Get("user_id")
+		if !exists {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "User ID not found"})
+			return
+		}
+
+		role, exists := c.Get("role")
+		if !exists || role != "admin" {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Anda tidak memiliki izin untuk mengakses log login pengguna"})
+			return
+		}
+
+		log.Printf("Fetching login logs for user_id: %v, role: %v", userId, role)
+
+		logs, err := db.GetLoginLogs(userId.(string))
+		if err != nil {
+			log.Printf("Error while fetching login logs: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil data log login"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"login_logs": logs})
 	})
 
 	r.POST("/recipe", db.ValidateToken, func(c *gin.Context) {

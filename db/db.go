@@ -21,9 +21,9 @@ import (
 )
 
 var DB *sql.DB
-var jwtSecret = []byte("your_secret_key") // Ganti dengan secret key Anda
+var jwtSecret = []byte("your_secret_key") 
 
-// Structs for request/response
+
 type Food struct {
 	ID         int    `json:"id"`
 	Name       string `json:"name"`
@@ -48,7 +48,15 @@ type Claims struct {
 	jwt.StandardClaims
 }
 
-// Inisialisasi database
+type LoginLog struct {
+	ID        int
+	UserID    int
+	Username  string
+	LoginTime string
+	IPAddress string
+}
+
+
 func InitDB() {
 	if err := godotenv.Load(); err != nil {
 		log.Fatal("Error loading .env file")
@@ -73,26 +81,59 @@ func InitDB() {
 	fmt.Println("✅ Berhasil terhubung ke database")
 }
 
-// Fungsi untuk menambah makanan
+func GetLoginLogs(userId string) ([]LoginLog, error) {
+	
+	rows, err := DB.Query("SELECT id, user_id, username, login_time, ip_address FROM login_logs ORDER BY login_time DESC")
+	if err != nil {
+		
+		return nil, fmt.Errorf("gagal menjalankan query: %v", err)
+	}
+	defer rows.Close() 
+
+	
+	var logs []LoginLog
+
+	
+	for rows.Next() {
+		var logEntry LoginLog
+		
+		if err := rows.Scan(&logEntry.ID, &logEntry.UserID, &logEntry.Username, &logEntry.LoginTime, &logEntry.IPAddress); err != nil {
+			
+			return nil, fmt.Errorf("gagal melakukan scan baris: %v", err)
+		}
+		logs = append(logs, logEntry)
+	}
+
+	
+	if err := rows.Err(); err != nil {
+		
+		return nil, fmt.Errorf("terjadi kesalahan saat iterasi: %v", err)
+	}
+
+	
+	return logs, nil
+}
+
+
 func AddFood(name, expiryDate, userId string) error {
 	_, err := DB.Exec("INSERT INTO foods (name, expiry_date, user_id) VALUES (?, ?, ?)", name, expiryDate, userId)
 	return err
 }
 
-// Function to generate JWT token
+
 func GenerateJWT(username string) (string, error) {
-	expirationTime := time.Now().Add(24 * time.Hour) // Set token expiration to 24 hours
+	expirationTime := time.Now().Add(24 * time.Hour) 
 	claims := &Claims{
 		Username: username,
 		StandardClaims: jwt.StandardClaims{
-			ExpiresAt: expirationTime.Unix(), // Set expiration time
-			Issuer:    "myapp",               // Issuer of the token
+			ExpiresAt: expirationTime.Unix(), 
+			Issuer:    "myapp",               
 		},
 	}
 
-	// Create new JWT token with claims and signing method
+	
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	// Sign the token with the secret key
+	
 	tokenString, err := token.SignedString(jwtSecret)
 	if err != nil {
 		return "", err
@@ -101,7 +142,7 @@ func GenerateJWT(username string) (string, error) {
 	return tokenString, nil
 }
 
-// Fungsi untuk mendapatkan makanan berdasarkan user
+
 func GetFoods(userId string) ([]Food, error) {
 	rows, err := DB.Query("SELECT id, name, expiry_date FROM foods WHERE user_id = ?", userId)
 	if err != nil {
@@ -121,13 +162,12 @@ func GetFoods(userId string) ([]Food, error) {
 	return foods, nil
 }
 
-// Fungsi untuk menambah resep makanan
+
 func AddFoodRecipe(foodID int, recipe, userId string) error {
 	_, err := DB.Exec("INSERT INTO food_recipes (food_id, recipe, user_id) VALUES (?, ?, ?)", foodID, recipe, userId)
 	return err
 }
 
-// Fungsi untuk mendapatkan resep makanan
 func GetFoodRecipes(userId string) ([]string, error) {
 	rows, err := DB.Query("SELECT recipe FROM food_recipes WHERE user_id = ?", userId)
 	if err != nil {
@@ -147,7 +187,7 @@ func GetFoodRecipes(userId string) ([]string, error) {
 	return recipes, nil
 }
 
-// Fungsi untuk menghasilkan resep menggunakan AI
+
 func GenerateRecipe(foodName string) (string, error) {
 	apiKey := os.Getenv("API_KEY")
 	if apiKey == "" {
@@ -179,7 +219,7 @@ func GenerateRecipe(foodName string) (string, error) {
 	return output.String(), nil
 }
 
-// Fungsi untuk validasi JWT token
+
 func ValidateToken(c *gin.Context) {
 	tokenString := c.GetHeader("Authorization")
 	if tokenString == "" {
@@ -188,7 +228,7 @@ func ValidateToken(c *gin.Context) {
 		return
 	}
 
-	tokenString = tokenString[7:] // Menghapus "Bearer " dari token
+	tokenString = tokenString[7:] 
 
 	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
@@ -223,41 +263,69 @@ func ValidateToken(c *gin.Context) {
 	}
 }
 
-// Fungsi untuk melakukan login
+func SaveLoginLog(userId, username, ipAddress string) error {
+	
+	loginTime := time.Now().UTC()
+
+	
+	_, err := DB.Exec("INSERT INTO login_logs (user_id, username, ip_address, login_time) VALUES (?, ?, ?, ?)", userId, username, ipAddress, loginTime)
+	if err != nil {
+		log.Printf("Error saving login log: %v", err)
+		return err
+	}
+	return nil
+}
+
+
 func LoginHandler(c *gin.Context) {
 	var req struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
 	}
 
+
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
 		return
 	}
 
+
 	var storedPasswordHash string
-	err := DB.QueryRow("SELECT password FROM users WHERE username = ?", req.Username).Scan(&storedPasswordHash)
+	var userId string
+	err := DB.QueryRow("SELECT id, password FROM users WHERE username = ?", req.Username).Scan(&userId, &storedPasswordHash)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
 		return
 	}
 
+	
 	err = bcrypt.CompareHashAndPassword([]byte(storedPasswordHash), []byte(req.Password))
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
 		return
 	}
 
+	
 	token, err := GenerateJWT(req.Username)
 	if err != nil {
 		c.JSON(500, gin.H{"error": "Failed to generate token"})
 		return
 	}
 
+	
+	ipAddress := c.ClientIP()
+
+	
+	err = SaveLoginLog(userId, req.Username, ipAddress)
+	if err != nil {
+		log.Printf("Gagal menyimpan log login: %v", err)
+	}
+
+	
 	c.JSON(200, gin.H{"token": token})
 }
 
-// Fungsi untuk melakukan registrasi
+
 func RegisterHandler(c *gin.Context) {
 	var req struct {
 		Username string `json:"username"`
@@ -297,7 +365,7 @@ func RegisterHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "User registered successfully"})
 }
 
-// Fungsi untuk hash password
+
 func hashPassword(password string) (string, error) {
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
@@ -306,7 +374,7 @@ func hashPassword(password string) (string, error) {
 	return string(hashedPassword), nil
 }
 
-// Fungsi untuk mendapatkan nama makanan berdasarkan ID
+
 func GetFoodName(foodID int, userId string) (string, error) {
 	var foodName string
 	err := DB.QueryRow("SELECT name FROM foods WHERE id = ? AND user_id = ?", foodID, userId).Scan(&foodName)
@@ -318,7 +386,7 @@ func GetFoodName(foodID int, userId string) (string, error) {
 func GetUsers() ([]map[string]interface{}, error) {
 	rows, err := DB.Query("SELECT id, username, role FROM users")
 	if err != nil {
-		log.Printf("Error executing query: %v", err) // Log the error for debugging
+		log.Printf("Error executing query: %v", err) 
 		return nil, err
 	}
 	defer rows.Close()
@@ -327,7 +395,7 @@ func GetUsers() ([]map[string]interface{}, error) {
 	for rows.Next() {
 		var userId, username, role string
 		if err := rows.Scan(&userId, &username, &role); err != nil {
-			log.Printf("Error scanning row: %v", err) // Log scanning error
+			log.Printf("Error scanning row: %v", err) 
 			return nil, err
 		}
 		user := map[string]interface{}{
