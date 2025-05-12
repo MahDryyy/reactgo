@@ -152,7 +152,6 @@ func main() {
 
 		c.JSON(http.StatusOK, gin.H{"login_logs": logs})
 	})
-
 	r.POST("/recipe", db.ValidateToken, func(c *gin.Context) {
 		var req db.RecipeRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -162,13 +161,22 @@ func main() {
 
 		userId := c.MustGet("user_id").(string)
 
-		var foodName string
-		err := db.DB.QueryRow("SELECT name FROM foods WHERE id = ? AND user_id = ?", req.FoodID, userId).Scan(&foodName)
-		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Makanan tidak ditemukan atau tidak milik Anda"})
-			return
+		// Ambil nama bahan makanan berdasarkan FoodID yang diterima
+		var foodNames []string
+		for _, foodID := range req.FoodID {
+			var foodName string
+			err := db.DB.QueryRow("SELECT name FROM foods WHERE id = ? AND user_id = ?", foodID, userId).Scan(&foodName)
+			if err != nil {
+				c.JSON(http.StatusNotFound, gin.H{"error": "Makanan tidak ditemukan atau tidak milik Anda"})
+				return
+			}
+			foodNames = append(foodNames, foodName)
 		}
 
+		// Gabungkan nama bahan makanan untuk digunakan dalam permintaan ke AI
+		ingredients := strings.Join(foodNames, ", ")
+
+		// Ambil API key dari environment variable
 		apiKey := os.Getenv("API_KEY")
 		if apiKey == "" {
 			log.Fatal("API key tidak ditemukan! Pastikan sudah diset di environment variable.")
@@ -180,8 +188,10 @@ func main() {
 		}
 		defer client.Close()
 
-		userInput := fmt.Sprintf("anggap dirimu adalah chef. Berikan resep gampang dan berikan ukuran pasti tapi enak untuk: %s. Di terakhir tuliskan by Chef SaveBite", foodName)
+		// Buat prompt untuk AI berdasarkan bahan makanan yang dipilih
+		userInput := fmt.Sprintf("anggap dirimu adalah chef. Berikan resep gampang dan berikan ukuran pasti tapi enak untuk bahan-bahan berikut: %s. Di terakhir tuliskan by Chef SaveBite", ingredients)
 
+		// Pilih model AI yang digunakan
 		model := client.GenerativeModel("gemini-1.5-flash")
 		resp, err := model.GenerateContent(ctx, genai.Text(userInput))
 		if err != nil {
@@ -189,22 +199,26 @@ func main() {
 			return
 		}
 
+		// Periksa apakah AI mengembalikan hasil yang valid
 		if len(resp.Candidates) == 0 || resp.Candidates[0].Content == nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "AI tidak mengembalikan hasil yang valid"})
 			return
 		}
 
+		// Gabungkan hasil dari AI menjadi satu string
 		var output strings.Builder
 		for _, part := range resp.Candidates[0].Content.Parts {
 			output.WriteString(fmt.Sprintf("%v\n", part))
 		}
 
+		// Simpan resep ke dalam database
 		err = db.AddFoodRecipe(req.FoodID, output.String(), userId)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menyimpan resep ke database"})
 			return
 		}
 
+		// Kirimkan resep sebagai response
 		c.JSON(http.StatusOK, db.RecipeResponse{Recipe: output.String()})
 	})
 

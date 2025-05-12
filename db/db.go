@@ -1,7 +1,6 @@
 package db
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -16,10 +15,8 @@ import (
 	"github.com/gin-gonic/gin"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/golang-jwt/jwt/v4"
-	"github.com/google/generative-ai-go/genai"
 	"github.com/joho/godotenv"
 	"golang.org/x/crypto/bcrypt"
-	"google.golang.org/api/option"
 )
 
 var DB *sql.DB
@@ -37,7 +34,7 @@ type AddFoodRequest struct {
 }
 
 type RecipeRequest struct {
-	FoodID int `json:"food_id"`
+	FoodID []int `json:"food_id"`
 }
 
 type RecipeResponse struct {
@@ -156,9 +153,14 @@ func GetFoods(userId string) ([]Food, error) {
 	return foods, nil
 }
 
-func AddFoodRecipe(foodID int, recipe, userId string) error {
-	_, err := DB.Exec("INSERT INTO food_recipes (food_id, recipe, user_id) VALUES (?, ?, ?)", foodID, recipe, userId)
-	return err
+func AddFoodRecipe(FoodID []int, recipe, userId string) error {
+	for _, foodID := range FoodID {
+		_, err := DB.Exec("INSERT INTO food_recipes (food_id, recipe, user_id) VALUES (?, ?, ?)", foodID, recipe, userId)
+		if err != nil {
+			return err // Kembalikan error jika ada masalah saat memasukkan data
+		}
+	}
+	return nil
 }
 
 func GetFoodRecipes(userId string) ([]RecipeResponse, error) {
@@ -180,36 +182,6 @@ func GetFoodRecipes(userId string) ([]RecipeResponse, error) {
 	}
 
 	return recipes, nil
-}
-func GenerateRecipe(foodName string) (string, error) {
-	apiKey := os.Getenv("API_KEY")
-	if apiKey == "" {
-		log.Fatal("API key tidak ditemukan! Pastikan sudah diset di environment variable.")
-	}
-	ctx := context.Background()
-	client, err := genai.NewClient(ctx, option.WithAPIKey(apiKey))
-	if err != nil {
-		log.Fatalf("Error creating AI client: %v", err)
-	}
-	defer client.Close()
-
-	userInput := fmt.Sprintf("anggap dirimu adalah chef. Berikan resep gampang dan berikan ukuran pasti tapi enak untuk: %s. Di terakhir tuliskan by Chef SaveBite", foodName)
-	model := client.GenerativeModel("gemini-1.5-flash")
-	resp, err := model.GenerateContent(ctx, genai.Text(userInput))
-	if err != nil {
-		return "", err
-	}
-
-	if len(resp.Candidates) == 0 || resp.Candidates[0].Content == nil {
-		return "", fmt.Errorf("AI tidak mengembalikan hasil yang valid")
-	}
-
-	var output strings.Builder
-	for _, part := range resp.Candidates[0].Content.Parts {
-		output.WriteString(fmt.Sprintf("%v\n", part))
-	}
-
-	return output.String(), nil
 }
 
 func ValidateToken(c *gin.Context) {
@@ -307,7 +279,7 @@ func LoginHandler(c *gin.Context) {
 
 	c.JSON(200, gin.H{
 		"token": token,
-		"role":  userRole, // Menyertakan role di response
+		"role":  userRole,
 	})
 }
 
