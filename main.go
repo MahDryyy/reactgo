@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/gin-contrib/cors" // Import package CORS
 	"github.com/gin-gonic/gin"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/google/generative-ai-go/genai"
@@ -16,13 +17,23 @@ import (
 )
 
 func main() {
+	// Initialize DB
 	db.InitDB()
 
+	// Set up Gin with default middleware
 	r := gin.Default()
 
+	r.Use(cors.New(cors.Config{
+		AllowOrigins: []string{"*"}, // Allow all origins, adjust for security
+		AllowMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowHeaders: []string{"Origin", "Content-Type", "Authorization"},
+	}))
+
+	// Register routes
 	r.POST("/register", db.RegisterHandler)
 	r.POST("/login", db.LoginHandler)
 
+	// Protected routes with ValidateToken middleware
 	r.GET("/recipes", db.ValidateToken, func(c *gin.Context) {
 		userId := c.MustGet("user_id").(string)
 
@@ -74,22 +85,18 @@ func main() {
 	})
 
 	r.DELETE("/recipes/:id", db.ValidateToken, func(c *gin.Context) {
-
 		id := c.Param("id")
-
 		userId := c.MustGet("user_id").(string)
 
 		var recipeUserId string
 		err := db.DB.QueryRow("SELECT user_id FROM food_recipes WHERE id = ?", id).Scan(&recipeUserId)
 		if err != nil || recipeUserId != userId {
-
 			c.JSON(http.StatusForbidden, gin.H{"error": "Resep tidak ditemukan atau tidak milik Anda"})
 			return
 		}
 
 		_, err = db.DB.Exec("DELETE FROM food_recipes WHERE id = ?", id)
 		if err != nil {
-
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menghapus resep"})
 			return
 		}
@@ -128,7 +135,6 @@ func main() {
 	})
 
 	r.GET("/login-logs", db.ValidateToken, func(c *gin.Context) {
-
 		userId, exists := c.Get("user_id")
 		if !exists {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "User ID not found"})
@@ -152,6 +158,7 @@ func main() {
 
 		c.JSON(http.StatusOK, gin.H{"login_logs": logs})
 	})
+
 	r.POST("/recipe", db.ValidateToken, func(c *gin.Context) {
 		var req db.RecipeRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -222,5 +229,6 @@ func main() {
 		c.JSON(http.StatusOK, db.RecipeResponse{Recipe: output.String()})
 	})
 
+	// Jalankan server di port 8080
 	r.Run(":8080")
 }
