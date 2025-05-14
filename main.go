@@ -168,7 +168,6 @@ func main() {
 
 		userId := c.MustGet("user_id").(string)
 
-		
 		var foodNames []string
 		for _, foodID := range req.FoodID {
 			var foodName string
@@ -180,10 +179,8 @@ func main() {
 			foodNames = append(foodNames, foodName)
 		}
 
-		
 		ingredients := strings.Join(foodNames, ", ")
 
-	
 		apiKey := os.Getenv("API_KEY")
 		if apiKey == "" {
 			log.Fatal("API key tidak ditemukan! Pastikan sudah diset di environment variable.")
@@ -195,10 +192,8 @@ func main() {
 		}
 		defer client.Close()
 
-		
 		userInput := fmt.Sprintf("anggap dirimu adalah chef. Berikan resep gampang dan berikan ukuran pasti tapi enak untuk bahan-bahan berikut: %s. Di terakhir tuliskan by Chef SaveBite", ingredients)
 
-		
 		model := client.GenerativeModel("gemini-1.5-flash")
 		resp, err := model.GenerateContent(ctx, genai.Text(userInput))
 		if err != nil {
@@ -206,29 +201,24 @@ func main() {
 			return
 		}
 
-		
 		if len(resp.Candidates) == 0 || resp.Candidates[0].Content == nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "AI tidak mengembalikan hasil yang valid"})
 			return
 		}
 
-		
 		var output strings.Builder
 		for _, part := range resp.Candidates[0].Content.Parts {
 			output.WriteString(fmt.Sprintf("%v\n", part))
 		}
 
-		
-		err = db.AddFoodRecipe(output.String(), userId)
+		err = db.AddFoodRecipe(req.FoodID, output.String(), userId)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menyimpan resep ke database"})
 			return
 		}
 
-		
 		c.JSON(http.StatusOK, db.RecipeResponse{Recipe: output.String()})
 	})
 
-	
 	r.Run(":8080")
 }
