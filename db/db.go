@@ -227,6 +227,28 @@ func ValidateToken(c *gin.Context) {
 	}
 }
 
+// Fungsi untuk menghapus 100 log login paling lama berdasarkan ID
+func DeleteOldLoginLogs(userId string, limit int) error {
+	// Hapus 100 log login paling lama berdasarkan ID
+	queryDelete := `
+        DELETE FROM login_logs 
+        WHERE user_id = ? 
+        ORDER BY id ASC
+        LIMIT ?
+    `
+	_, err := DB.Exec(queryDelete, userId, limit)
+	if err != nil {
+		return err
+	}
+
+	// Reset AUTO_INCREMENT ke 1 setelah penghapusan
+	queryReset := `
+        ALTER TABLE login_logs AUTO_INCREMENT = 1
+    `
+	_, err = DB.Exec(queryReset)
+	return err
+}
+
 func SaveLoginLog(userId, username, ipAddress string) error {
 
 	loginTime := time.Now().UTC()

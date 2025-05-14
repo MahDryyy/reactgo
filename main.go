@@ -149,6 +149,7 @@ func main() {
 
 		log.Printf("Fetching login logs for user_id: %v, role: %v", userId, role)
 
+		// Ambil log login untuk user tertentu
 		logs, err := db.GetLoginLogs(userId.(string))
 		if err != nil {
 			log.Printf("Error while fetching login logs: %v", err)
@@ -156,6 +157,19 @@ func main() {
 			return
 		}
 
+		// Periksa jika jumlah log sudah mencapai 100 berdasarkan ID
+		if len(logs) > 100 {
+			// Hapus 100 log login yang lama berdasarkan ID
+			err := db.DeleteOldLoginLogs(userId.(string), 100)
+			if err != nil {
+				log.Printf("Error while deleting old login logs: %v", err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menghapus log login lama"})
+				return
+			}
+			log.Println("Deleted 100 old login logs based on ID")
+		}
+
+		// Kirim data log yang diambil
 		c.JSON(http.StatusOK, gin.H{"login_logs": logs})
 	})
 
