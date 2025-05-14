@@ -155,7 +155,7 @@ func GetFoods(userId string) ([]Food, error) {
 
 func AddFoodRecipe(recipe, userId string) error {
 	{
-		_, err := DB.Exec("INSERT INTO food_recipes ( recipe, user_id) VALUES (?, ?, ?)", recipe, userId)
+		_, err := DB.Exec("INSERT INTO food_recipes ( recipe, user_id) VALUES ( ?, ?)", recipe, userId)
 		if err != nil {
 			return err
 		}
