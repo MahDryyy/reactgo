@@ -157,7 +157,7 @@ func AddFoodRecipe(FoodID []int, recipe, userId string) error {
 	for _, foodID := range FoodID {
 		_, err := DB.Exec("INSERT INTO food_recipes (food_id, recipe, user_id) VALUES (?, ?, ?)", foodID, recipe, userId)
 		if err != nil {
-			return err
+			return err // Kembalikan error jika ada masalah saat memasukkan data
 		}
 	}
 	return nil
@@ -165,7 +165,7 @@ func AddFoodRecipe(FoodID []int, recipe, userId string) error {
 
 func GetFoodRecipes(userId string) ([]RecipeResponse, error) {
 
-	rows, err := DB.Query("SELECT id, recipe FROM food_recipes WHERE user_id = ?", userId)
+	rows, err := DB.Query("SELECT id, food_id, recipe FROM food_recipes WHERE user_id = ?", userId)
 	if err != nil {
 		return nil, err
 	}

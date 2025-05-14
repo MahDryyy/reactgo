@@ -168,6 +168,7 @@ func main() {
 
 		userId := c.MustGet("user_id").(string)
 
+		// Ambil nama bahan makanan berdasarkan FoodID yang diterima
 		var foodNames []string
 		for _, foodID := range req.FoodID {
 			var foodName string
@@ -179,8 +180,10 @@ func main() {
 			foodNames = append(foodNames, foodName)
 		}
 
+		// Gabungkan nama bahan makanan untuk digunakan dalam permintaan ke AI
 		ingredients := strings.Join(foodNames, ", ")
 
+		// Ambil API key dari environment variable
 		apiKey := os.Getenv("API_KEY")
 		if apiKey == "" {
 			log.Fatal("API key tidak ditemukan! Pastikan sudah diset di environment variable.")
@@ -192,8 +195,10 @@ func main() {
 		}
 		defer client.Close()
 
+		// Buat prompt untuk AI berdasarkan bahan makanan yang dipilih
 		userInput := fmt.Sprintf("anggap dirimu adalah chef. Berikan resep gampang dan berikan ukuran pasti tapi enak untuk bahan-bahan berikut: %s. Di terakhir tuliskan by Chef SaveBite", ingredients)
 
+		// Pilih model AI yang digunakan
 		model := client.GenerativeModel("gemini-1.5-flash")
 		resp, err := model.GenerateContent(ctx, genai.Text(userInput))
 		if err != nil {
@@ -201,41 +206,29 @@ func main() {
 			return
 		}
 
+		// Periksa apakah AI mengembalikan hasil yang valid
 		if len(resp.Candidates) == 0 || resp.Candidates[0].Content == nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "AI tidak mengembalikan hasil yang valid"})
 			return
 		}
 
+		// Gabungkan hasil dari AI menjadi satu string
 		var output strings.Builder
 		for _, part := range resp.Candidates[0].Content.Parts {
 			output.WriteString(fmt.Sprintf("%v\n", part))
 		}
 
-		var count int
-		err = db.DB.QueryRow("SELECT COUNT(*) FROM food_recipes WHERE user_id = ?", userId).Scan(&count)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memeriksa jumlah resep"})
-			return
-		}
-
-		
-		if count >= 20 {
-			_, err := db.DB.Exec("DELETE FROM food_recipes WHERE user_id = ? ORDER BY id ASC LIMIT 10", userId)
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menghapus resep lama"})
-				return
-			}
-		}
-
-
+		// Simpan resep ke dalam database
 		err = db.AddFoodRecipe(req.FoodID, output.String(), userId)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menyimpan resep ke database"})
 			return
 		}
 
+		// Kirimkan resep sebagai response
 		c.JSON(http.StatusOK, db.RecipeResponse{Recipe: output.String()})
 	})
 
+	// Jalankan server di port 8080
 	r.Run(":8080")
 }
