@@ -211,6 +211,23 @@ func main() {
 			output.WriteString(fmt.Sprintf("%v\n", part))
 		}
 
+		var count int
+		err = db.DB.QueryRow("SELECT COUNT(*) FROM food_recipes WHERE user_id = ?", userId).Scan(&count)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memeriksa jumlah resep"})
+			return
+		}
+
+		
+		if count >= 20 {
+			_, err := db.DB.Exec("DELETE FROM food_recipes WHERE user_id = ? ORDER BY id ASC LIMIT 10", userId)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menghapus resep lama"})
+				return
+			}
+		}
+
+
 		err = db.AddFoodRecipe(req.FoodID, output.String(), userId)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menyimpan resep ke database"})
