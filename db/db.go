@@ -154,13 +154,25 @@ func GetFoods(userId string) ([]Food, error) {
 }
 
 func AddFoodRecipe(FoodID []int, recipe, userId string) error {
-	for _, foodID := range FoodID {
-		_, err := DB.Exec("INSERT INTO food_recipes (food_id, recipe, user_id) VALUES (?, ?, ?)", foodID, recipe, userId)
-		if err != nil {
-			return err // Kembalikan error jika ada masalah saat memasukkan data
-		}
+	// Gabungkan semua foodID menjadi satu string
+	foodIDsStr := strings.Join(intSliceToString(FoodID), ", ")
+
+	// Simpan satu entri untuk kombinasi semua FoodID
+	_, err := DB.Exec("INSERT INTO food_recipes (food_id, recipe, user_id) VALUES (?, ?, ?)", foodIDsStr, recipe, userId)
+	if err != nil {
+		return err // Kembalikan error jika ada masalah saat memasukkan data
 	}
+
 	return nil
+}
+
+// Helper function untuk mengonversi slice int ke slice string
+func intSliceToString(ids []int) []string {
+	var result []string
+	for _, id := range ids {
+		result = append(result, fmt.Sprintf("%d", id))
+	}
+	return result
 }
 
 func GetFoodRecipes(userId string) ([]RecipeResponse, error) {
